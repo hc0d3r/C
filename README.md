@@ -1,4 +1,4 @@
 C
 =
 
-Alguns scripts simples, feitos em C !
+Scripts in C =)
