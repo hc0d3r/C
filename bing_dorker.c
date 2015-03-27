@@ -3,62 +3,52 @@
 #include <curl/curl.h>
 #include <stdlib.h>
 #include <getopt.h>
+#include <errno.h>
 
-/*
+#define SEARCH "<li class=\"b_algo\"><h2><a href="
+#define URI "www.bing.com/search?q=%s&first=%d&FORM=PERE"
+#define putchit(x) \
+	if(verbose) \
+		putchar(x); \
+	if(output) \
+		putc(x, output);
 
- Bing Dorker
- By MMxM
-
- [hc0der.blogspot.com]
-
-*/
-
-int verbose = 0;
-int outp = 0;
-FILE *out;
-
-void open_file(const char *outo){
-	out = fopen(outo,"a");
-	if(out == NULL){
-		fprintf(stderr,"\nError: Open file %s\n",outo);
-		exit(1);
-	}
-}
-
-void help_m(){
-	printf("\n Bing Dorker by MMxM\n");
-	printf(" [hc0der.blogspot.com]\n\n");
-	printf(" Options:\n\n");
-	printf("\t-s [string to search]\n");
-	printf("\t-v [be verbose]\n");
-	printf("\t-o [output file]\n\n");
-	printf(" Example:\n\n");
-	printf("\t./bing -s 'a b c' -v -o /tmp/urls.txt\n\n");
-	exit(0);
-}
-
-struct string{
+struct dynamic_str {
 	char *ptr;
 	size_t len;
 };
 
-void init_string(struct string *s){
+void die(const char *err){
+	perror(err);
+	exit(1);
+}
+
+void help(void){
+	printf("\nBing Dorker by MMxM\n");
+	printf("[hc0der.blogspot.com]\n\n");
+	printf("\tOptions:\n\n");
+	printf("\t-s [string to search]\n");
+	printf("\t-v [verbose mode]\n");
+	printf("\t-o [output file]\n\n");
+	exit(0);
+}
+
+void init_string(struct dynamic_str *s){
 	s->len = 0;
 	s->ptr = malloc(s->len+1);
-	if (s->ptr == NULL) {
-		fprintf(stderr, "malloc() failed\n");
-		exit(EXIT_FAILURE);
-	}
+
+	if(s->ptr == NULL)
+		die("malloc() failed");
+
 	s->ptr[0] = '\0';
 }
 
-size_t writefunc(void *ptr, size_t size, size_t nmemb, struct string *s){
+size_t writefunc(void *ptr, size_t size, size_t nmemb, struct dynamic_str *s){
 	size_t new_len = s->len + size*nmemb;
 	s->ptr = realloc(s->ptr, new_len+1);
-	if (s->ptr == NULL) {
-		fprintf(stderr, "realloc() failed\n");
-		exit(EXIT_FAILURE);
-	}
+
+	if(s->ptr == NULL)
+		die("realloc() failed");
 
 	memcpy(s->ptr+s->len, ptr, size*nmemb);
 	s->ptr[new_len] = '\0';
@@ -67,50 +57,36 @@ size_t writefunc(void *ptr, size_t size, size_t nmemb, struct string *s){
 	return size*nmemb;
 }
 
-int extract_link(char *html){
-	int count = 0;
-	char search[]="<li class=\"b_algo\"><h2><a href=";
-	int reg_s = strlen(search);
-	int vet_p = 1;
+int extract_link(const char *body, int verbose, FILE *output){
+	static const char search[]="<li class=\"b_algo\"><h2><a href=\"";
+	int i,j,ret = 0;
 
-	while(1){
-		char *extrai = strstr(html,search);
-		if(extrai){
-			char c = html[extrai-html+reg_s+vet_p];
-			if(c != '"'){
-				if(verbose) printf("%c",c);
-				if(outp) fputc(c,out);
-				vet_p++;
-			} else {
-				count++;
-				if(verbose) printf("\n");
-				if(outp) fputc('\n',out);
-				memset(extrai,0,sizeof(extrai));
-				memset(html,1,(extrai-html+reg_s+vet_p+1));
-				vet_p = 1;
+	for(i=0; body[i]; i++){
+		for(j=0 ; body[i+j] == search[j]; j++){
+			if(search[j+1] == 0x0){
+				j++;
+
+				for(;body[i+j] && body[i+j] != '"'; j++){
+					putchit(body[i+j]);
+				}
+
+				putchit('\n');
+
+				i += j;
+				ret = 1;
 			}
-		} else {
-			break;
 		}
 	}
 
-	return (count > 0 ? 0 : 1);
-
+	return ret;
 }
-
-char *url_encode(char *s){
-        CURL *a;
-        a = curl_easy_init();
-        char *encode = (char*)curl_easy_escape(a, s, strlen(s));
-        curl_easy_cleanup(a);
-        return encode;
-}
-
 
 int main(int argc,char *argv[]){
-	int o;
-	char *output = NULL;
-	char *search = NULL;
+	char *filename=NULL, *search=NULL, *encode=NULL, o;
+	struct dynamic_str body, url;
+	FILE *output=NULL;
+	int verbose=0, i;
+	CURL *curl;
 
 	while ((o = getopt (argc, argv, "s:o:v")) != -1)
 		switch(o){
@@ -121,8 +97,7 @@ int main(int argc,char *argv[]){
 				search = optarg;
 				break;
 			case 'o':
-				output = optarg;
-				outp = 1;
+				filename = optarg;
 				break;
 			case '?':
 				if(optopt == 's')
@@ -138,50 +113,54 @@ int main(int argc,char *argv[]){
 				abort();
 	}
 
-	if(search == NULL)
-		help_m();
+	if(search == NULL || (filename == NULL && verbose == 0))
+		help();
 
-	if(output == NULL && verbose == 0)
-		help_m();
-
-	if(output != NULL)
-		open_file(output);
+	if(filename){
+		if( (output = fopen(filename, "a")) == NULL )
+			die("fopen()");
+	}
 
 	printf("\nSearching for '%s' ...\n\n",search);
-	char *encode = url_encode(search);
+	encode = curl_easy_escape(NULL, search, strlen(search));
 
-	int i;
-	char url[strlen(encode)+sizeof(int)+39];
+	url.len = strlen(encode)+sizeof(int)+40;
 
-	for(i=1;i<501;i+=10){
-		CURL *curl;
+	if( (url.ptr = malloc( url.len )) == NULL ){
+		die("malloc() failed");
+	}
+
+
+	for(i=1;i<=211;i+=10){
 		curl = curl_easy_init();
-		struct string s;
-		init_string(&s);
+		init_string(&body);
 
-		memset(url,0,sizeof(url));
-
-		snprintf(url,sizeof(url),"www.bing.com/search?q=%s&first=%d&FORM=PERE",encode,i);
+		memset(url.ptr, 0, url.len-1);
+		snprintf(url.ptr, url.len-1, URI, encode, i);
 
 		curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15);
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (X11; Linux x86_64; rv:29.0) Gecko/20100101 Firefox/29.0");
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunc);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &s);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
 		curl_easy_perform(curl);
 
-		if(extract_link(s.ptr) != 0){
-			if(output != NULL) fclose(out);
-			free(s.ptr);
+		if(!extract_link(body.ptr, verbose, output)){
+			free(body.ptr);
 			curl_easy_cleanup(curl);
+
+			if(output)
+				fclose(output);
 			break;
 		}
 
-		free(s.ptr);
+		free(body.ptr);
 		curl_easy_cleanup(curl);
 	}
 
 	curl_free(encode);
+	free(url.ptr);
+
 	printf("\n[ Finish !!! ]\n\n");
-	return(0);
+	return 0;
 }
