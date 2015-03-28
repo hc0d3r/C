@@ -1,6 +1,6 @@
 /* ==============================
  * $ date
- * Wed Dec 25 14:51:43 BRST 2013
+ * Sáb Mar 28 17:10:06 BRT 2015
  * $ whoami
  * MMxM
  * $ pwd
@@ -19,11 +19,11 @@
 
 #define WHOIS "registro.br"
 
-char *whois_br(char *hostname);
-int error(char *msg);
-int help();
+void whois_br(const char *hostname);
+void error(char *msg);
+void help(void);
 
-int help(){
+void help(void){
 	fprintf(stderr,"\n[+] Whois query .br domains\n");
 	fprintf(stderr,"[-] *(Coder)-> MMxM\n");
 	fprintf(stderr,"[*] Usage: ./whois_br (domain).br\n");
@@ -31,14 +31,14 @@ int help(){
 	exit(1);
 }
 
-int error(char *msg){
+void error(char *msg){
 	perror(msg);
 	exit(1);
 }
 
-char *whois_br(char *site_name){
+void whois_br(const char *hostname){
 	int msocket,recebidos;
-	char *resposta = (char *)malloc(5000);
+	char resposta[5000];
 	struct sockaddr_in addr;
 	struct hostent *host;
 
@@ -58,16 +58,13 @@ char *whois_br(char *site_name){
 	if(connect(msocket,(struct sockaddr*)&addr,sizeof(addr)) == -1)
 		error("Fail to connect");
 
-	strncat(site_name,"\n",1);
-
-	if(send(msocket,site_name,strlen(site_name),0) == -1)
+	if( (send(msocket, hostname, strlen(hostname),0) == -1) || (send(msocket, "\n", 1, 0) == -1) )
 		error("Fail to make request");
 
-	while(recebidos = recv(msocket,resposta,4999,0))
+	while( (recebidos = recv(msocket,resposta,4999,0)) ){
 		resposta[recebidos] = '\0';
-
-
-	return resposta;
+		puts(resposta);
+	}
 }
 
 int main(int argc,char **argv){
@@ -75,7 +72,7 @@ int main(int argc,char **argv){
 	if(argc != 2)
 		help();
 
-	char *whois = whois_br(argv[1]);
-	fprintf(stdout,"%s",whois);
-	free(whois);
+	whois_br(argv[1]);
+
+	return 0;
 }
