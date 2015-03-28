@@ -7,8 +7,6 @@
  * Author: MMxM | hc0der.blogspot.com	*
  * ************************************	*/
 
-
-
 int main(void){
 	FILE *proc;
 
@@ -62,6 +60,7 @@ int main(void){
 		printf("CPU: %6.2f%%\r", (float)diff_usage/(float)diff_total );
 		fflush(stdout);
 		sleep(1);
+		fclose(proc);
 	}
 
 	return 0;
