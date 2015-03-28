@@ -1,7 +1,5 @@
 #include <stdio.h>
 #include <unistd.h>
-#include <string.h>
-#include <stdlib.h>
 
 /* ************************************ *
  * CPU USAGE CALC , Using /proc/stat	*
