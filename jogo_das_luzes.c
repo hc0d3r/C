@@ -82,7 +82,7 @@ void update(char k[5][5], int x, int y){
 
 int main(){
 	static char k[5][5];
-	int x, y, numx = 0, numy = 0;
+	int numx = 0, numy = 0;
 
 
 	while(1){
