@@ -1,42 +1,44 @@
 #include <windows.h>
 #include <winreg.h>
 #include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
- 
-// c0der => MMxM [http://hc0der.blogspot.com]
- 
-int check_vbox(){
-	int result;
+
+/*
+ Virtual box detection checking an register key
+ c0der => MMxM [http://hc0der.blogspot.com]
+*/
+
+int CheckVbox(void){
+
 	HKEY key;
-	long check,ccheck;
-	char *value = malloc(151);
-	DWORD tipo = REG_MULTI_SZ,size = 150;
+	DWORD tipo = REG_MULTI_SZ, size = 150;
+	BYTE value[500];
+
+	if(RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("HARDWARE\\DESCRIPTION\\System"), 0, KEY_READ, &key) != ERROR_SUCCESS){
+		return 0;
+	}
  
-	check = RegOpenKeyEx(HKEY_LOCAL_MACHINE,TEXT("HARDWARE\\DESCRIPTION\\System"),0,KEY_READ,&key);
-	if(check != ERROR_SUCCESS)
-		exit(1);
- 
-	ccheck = RegQueryValueEx(key,TEXT("SystemBiosVersion"),0,&tipo,value,&size);
-	if(ccheck != ERROR_SUCCESS)
-		exit(1);
+	if( RegQueryValueEx(key, TEXT("SystemBiosVersion"), 0, &tipo, value, &size) != ERROR_SUCCESS){
+		return 0;
+	}
  
 	RegCloseKey(key);
  
-	if(strstr(value,"VBOX"))
-		result = 1;
-	else
-		result = 0;
- 
-	free(value);
-	return result;
+	if(strstr(value,"VBOX")){
+		return 1;
+	} else {
+		return 0;
+	}
+
 }
- 
-int main(){
-	FreeConsole();
-	int c = check_vbox();
-	if(c == 1)
+
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow){
+
+	if(CheckVbox()){
 		MessageBox(NULL, "Virtual box detected !!!", "Virtual Box", MB_ICONEXCLAMATION);
-	if(c == 0)
+	} else {
 		MessageBox(NULL, "Virtual box not detected !!!", "Virtual Box", MB_OK);
+	}
+
+	return 0;
 }
