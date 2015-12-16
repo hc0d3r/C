@@ -1,117 +1,138 @@
 #include <stdio.h>
-#include <errno.h>
-#include <netdb.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <string.h>
 #include <stdlib.h>
-#define RED "\033[0;31m"
-#define GREEN "\033[0;32m"
-#define CYAN "\033[1;36m"
-#define RESET "\033[0m"
 
-/*
-
-%# date
-Wed Mar  5 00:38:56 BRT 2014
-%# hostname
-hc0der.blogspot.com
-%# cat readme
-                            _.
-                         ,-" .\,-"`.		 _______________
-                       ,:   . /,-.  `.		( Coded by MMxM )
-                      /"     :,-  `   \		 ----------------
-                     |.    .`/,. `.    \       /
-                    /  /  /_\)/_\       .     /
-                   .  .  /' / \ "\	     /
-                   |  : ,' .   . \ \\ . |   /
-                   |  : || |   | | || . '
-                   \__\_bo..  ...bo)L L/
-                     |9|\_*_" "_*_/|?T
-                     \(` --- L --- ')/
-                    .'`-|   ___   |-:
-               .---"  -. .   =   ,   `.
-               ""-._ --./ "-._.-"|     "-._
-                  .-"-. \  \      \   _..-<_
-              .--"     ) `. \   /  | :-"..  \
-           .-'_     \ ,'  \\"`.,'""   \   `  |
-          /    `.    | "-. `   \    |/"    | \
-              .  \      _ \:|   |  ,|."""""| /
-         /   :    |.-""" | \|`._'_.  |`.  .( \
-        /|  '     ||_  .' `:'        |: `v \  |
-       / | :      |  "")  :|         |:  |  | |
-       |          /|   /  :|         |:  /  / )
-       (         | /_.|...:|         /  |  |  |
-      / \        /_..-----"'         """-,-   |
-     |          /`--\                   |\  `.)
-     |         |     |                ,/ `. `.\
-     /   _Seal_|      "._..---""""---./\ ` `. )
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <arpa/inet.h>
 
 
-*/
+#define RED "\e[0;31m"
+#define GREEN "\e[0;32m"
+#define CYAN "\e[1;36m"
+#define RESET "\e[0m"
 
-char *chomp(char *sub){
-	int len = strlen(sub)-1;
-	if(sub[len] == '\n')
-		sub[len] = '\0';
-	return sub;
+#define error(f, x...) \
+	fprintf(f, "%s[-]%s ", RED, RESET); \
+	fprintf(f, x);
+
+#define good(f, x...) \
+	fprintf(f, "%s[+]%s ", GREEN, RESET); \
+	fprintf(f, x);
+
+#define info(f, x...) \
+	fprintf(f, "%s[*]%s ", CYAN, RESET); \
+	fprintf(f, x);
+
+void chomp(char *str){
+	size_t i;
+
+	for(i=0; str[i]; i++){
+		if(str[i] == '\n'){
+			str[i] = 0x0;
+			break;
+		}
+	}
 }
 
-void check_host(char *host){
-	struct hostent *hostname;
-	struct in_addr **address_list;
-	int i;
+void check_host(const char *host){
 
-	hostname = gethostbyname(host);
-	if(hostname == NULL){
-		fprintf(stdout,"%s[-]%s Unknown host\n",RED,RESET);
+	struct addrinfo hints, *res, *addr;
+	char str_ip[INET6_ADDRSTRLEN];
+	int status;
+
+	memset(&hints, 0x0, sizeof(struct addrinfo));
+
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags |= AI_CANONNAME;
+
+
+
+	if( getaddrinfo(host, NULL, &hints, &res) ){
+		error(stdout, "Unknow host\n");
 		return;
 	}
 
-	address_list = (struct in_addr **) hostname->h_addr_list;
+	good(stdout, "%s\n", host);
 
-	fprintf(stdout,"%s[+]%s %s { ",GREEN,RESET,host);
-	for(i=0;address_list[i] != NULL; i++)
-		fprintf(stdout,"'%s' ",inet_ntoa(*address_list[i]));
-	fprintf(stdout,"}\n");
+	for(addr=res; addr!=NULL; addr=addr->ai_next){
+		if(addr->ai_family == AF_INET){
+			inet_ntop(addr->ai_family, &((struct sockaddr_in *) addr->ai_addr)->sin_addr ,str_ip, INET6_ADDRSTRLEN);
+		} else {
+			inet_ntop(addr->ai_family, &((struct sockaddr_in6 *) addr->ai_addr)->sin6_addr ,str_ip, INET6_ADDRSTRLEN);
+		}
+		info(stdout,"%s\n", str_ip);
+	}
+
+	freeaddrinfo(res);
+
 }
 
-void help(){
-	fprintf(stderr,"\n[%s+%s] Subdomain Finder by MMxM\n",GREEN,RESET);
-	fprintf(stderr,"[%s*%s] Usage: ./sub <target> <subdomain_wordlist>\n\n",CYAN,RESET);
-	exit(1);
+void help(void){
+	good(stdout, "Subdomain finder by m\n");
+	info(stdout, "Usage: ./subdomain [target-hostname] [subdomain-wordlist]\n",CYAN,RESET);
+	exit(0);
 }
 
 int main(int argc, char *argv[]){
-	if(argc != 3)
+
+	if(argc != 3){
 		help();
+	}
 
-	const char *target = argv[1];
-	const char *arquivo = argv[2];
-
-	char line[100];
+	char *target = argv[1], *arquivo = argv[2];
+	char line[1024];
 	char *result;
 	FILE *arq;
 
+	int i, j;
+	char *subdominio;
+	size_t host_len;
+
 	if( (arq = fopen(arquivo, "rt")) == NULL ){
-		fprintf(stdout,"%s[-]%s fopen(\"%s\",\"rt\"): %s \n",RED,RESET,arquivo,strerror(errno));
+		error(stderr, "fopen() failed\n");
 		return 1;
 	}
 
+	host_len = strlen(target);
+
 	while(!feof(arq)){
-		result = fgets(line,100,arq);
-		if(result){
-			chomp(result);
-			int size = strlen(result)+strlen(target)+2;
-			char *subdominio = (char *) malloc(size);
-			sprintf(subdominio,"%s.%s",result,target);
-			fprintf(stdout,"%s[*]%s Checking => %s\n",CYAN,RESET,subdominio);
+
+		if( fgets(line, 1024, arq) ){
+			chomp(line);
+
+			if( (subdominio = malloc( host_len + strlen(line) + 2)) == NULL ){
+				error(stderr, "malloc() failed\n");
+				exit(1);
+			}
+
+			for(j=0; line[j]; j++){
+				subdominio[j] = line[j];
+			}
+
+			if(j){
+				if(line[j-1] != '.' && target[0] != '.'){
+					subdominio[j++] = '.';
+				}
+			}
+
+			for(i=0; target[i]; i++, j++){
+				subdominio[j] = target[i];
+			}
+
+			subdominio[j] = 0x0;
+
+
+			info(stdout, "Checking -> %s\n", subdominio);
 			check_host(subdominio);
 			free(subdominio);
+
 		}
 	}
+
+	fclose(arq);
 
 	return 0;
 }
