@@ -40,7 +40,6 @@ void check_host(const char *host){
 
 	struct addrinfo hints, *res, *addr;
 	char str_ip[INET6_ADDRSTRLEN];
-	int status;
 
 	memset(&hints, 0x0, sizeof(struct addrinfo));
 
@@ -72,7 +71,7 @@ void check_host(const char *host){
 
 void help(void){
 	good(stdout, "Subdomain finder by m\n");
-	info(stdout, "Usage: ./subdomain [target-hostname] [subdomain-wordlist]\n",CYAN,RESET);
+	info(stdout, "Usage: ./subdomain [target-hostname] [subdomain-wordlist]\n");
 	exit(0);
 }
 
@@ -82,13 +81,10 @@ int main(int argc, char *argv[]){
 		help();
 	}
 
-	char *target = argv[1], *arquivo = argv[2];
-	char line[1024];
-	char *result;
+	char *target = argv[1], *arquivo = argv[2], *subdominio, line[1024];
 	FILE *arq;
 
 	int i, j;
-	char *subdominio;
 	size_t host_len;
 
 	if( (arq = fopen(arquivo, "rt")) == NULL ){
