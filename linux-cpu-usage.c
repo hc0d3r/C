@@ -1,68 +1,72 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 
-/* ************************************ *
- * CPU USAGE CALC , Using /proc/stat	*
- * Sáb Mar 28 16:18:44 BRT 2015		*
- * Author: MMxM | hc0der.blogspot.com	*
- * ************************************	*/
 
-int main(void){
-	FILE *proc;
+int *parser_result(const char *buf, int size){
+	static int ret[10];
+	int i, j = 0, start = 0;
 
-	char c;
+	for(i=0; i<size; i++){
+		char c = buf[i];
+		if(c >= '0' && c <= '9'){
+			if(!start){
+				start = 1;
+				ret[j] = c-'0';
+			} else {
+				ret[j] *= 10;
+				ret[j] += c-'0';
+			}
+		} else if(c == '\n'){
+			break;
+		} else {
+			if(start){
+				j++;
+				start = 0;
+			}
+		}
+	}
 
-	int i=0, cpu_found=0, tmp = 0, total=0, prev_total=0, diff_idle=0, diff_total=0, idle=0, prev_idle=0, x=0, diff_usage=0;
+	return ret;
+}
+
+
+
+int main(int argc, char **argv){
+	char buf[256];
+	int size, fd, *nums, prev_idle = 0, prev_total = 0, idle, total, i;
+
+	fd = open("/proc/stat", O_RDONLY);
 
 	while(1){
-		if( (proc = fopen("/proc/stat","r")) == NULL){
-			printf("Failed to open file\n");
-			return 1;
+		size = read(fd, buf, sizeof(buf));
+		if(size <= 0)
+			break;
+
+		nums = parser_result(buf, size);
+
+		idle=nums[3];
+
+		for(i=0, total=0; i<10; i++){
+			total += nums[i];
 		}
 
 
-		while( (c = fgetc(proc)) != EOF ){
-			if( (c == 'c' && i == 0) || (c == 'p' && i == 1) || (c == 'u' && i == 2)){
-				cpu_found++;
-			}
-
-			else if( c >= '0' && c <= '9' && cpu_found == 3){
-				tmp *= 10;
-				tmp += c-'0';
-			}
-
-			else if( c == ' ' && cpu_found == 3 ){
-				total += tmp;
-				x++;
-				if( x == 6 )
-					idle = tmp;
-				tmp = 0;
-			}
-
-			else if( c == '\n' && cpu_found == 3 ){
-				i = 0;
-				cpu_found = 0;
-				total += tmp;
-				tmp = 0;
-				break;
-			}
-			i++;
-		}
-
-		diff_idle = idle-prev_idle;
-		diff_total = total-prev_total;
-
-		prev_total=total;
-		prev_idle=idle;
-
-		diff_usage=100*(diff_total - diff_idle);
-
-		printf("CPU: %6.2f%%\r", (float)diff_usage/(float)diff_total );
+		int diff_idle = idle-prev_idle;
+		int diff_total = total-prev_total;
+		float usage = (float)(((float)(1000*(diff_total-diff_idle))/(float)diff_total+5)/(float)10);
+		printf("\r%%%6.2f", usage);
 		fflush(stdout);
-		sleep(1);
-		fclose(proc);
+
+		prev_total = total;
+		prev_idle = idle;
+
+		sleep(3);
+		lseek(fd, 0, SEEK_SET);
 	}
 
 	return 0;
-
 }
