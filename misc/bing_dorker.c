@@ -1,3 +1,5 @@
+// gcc bing_dorker.c -o bing-search -lcurl
+
 #include <stdio.h>
 #include <string.h>
 #include <curl/curl.h>
@@ -5,162 +7,166 @@
 #include <getopt.h>
 #include <errno.h>
 
-#define SEARCH "<li class=\"b_algo\"><h2><a href="
 #define URI "www.bing.com/search?q=%s&first=%d&FORM=PERE"
-#define putchit(x) \
-	if(verbose) \
-		putchar(x); \
-	if(output) \
-		putc(x, output);
 
-struct dynamic_str {
-	char *ptr;
-	size_t len;
+struct request_data {
+    char *ptr;
+    size_t len;
+    size_t index;
 };
 
 void die(const char *err){
-	perror(err);
-	exit(1);
+    perror(err);
+    exit(1);
 }
 
 void help(void){
-	printf("\nBing Dorker by MMxM\n");
-	printf("[hc0der.blogspot.com]\n\n");
-	printf("\tOptions:\n\n");
-	printf("\t-s [string to search]\n");
-	printf("\t-v [verbose mode]\n");
-	printf("\t-o [output file]\n\n");
-	exit(0);
+    const char *banner =
+        "usage: bing-search [OPTIONS] [SEARCH STRING]\n\n"
+        "Options:\n"
+        " -q          quiet mode\n"
+        " -o FILE     write result to file";
+
+    puts(banner);
+    exit(0);
 }
 
-void init_string(struct dynamic_str *s){
-	s->len = 0;
-	s->ptr = malloc(s->len+1);
+size_t writefunc(void *ptr, size_t size, size_t nmemb, struct request_data *s){
+    size_t new_len = s->index + size*nmemb;
 
-	if(s->ptr == NULL)
-		die("malloc() failed");
+    // I use s->len for not need free and alloc/realloc
+    // the memory every time, instead of this I only set s->index to 0
+    if(new_len > s->len){
+        s->len = new_len;
+        s->ptr = realloc(s->ptr, new_len+1);
+    }
 
-	s->ptr[0] = '\0';
+    if(s->ptr == NULL)
+        die("realloc() failed");
+
+    memcpy(s->ptr+s->index, ptr, size*nmemb);
+    //s->ptr[new_len] = '\0';
+    s->index = new_len;
+
+    return size*nmemb;
 }
 
-size_t writefunc(void *ptr, size_t size, size_t nmemb, struct dynamic_str *s){
-	size_t new_len = s->len + size*nmemb;
-	s->ptr = realloc(s->ptr, new_len+1);
+int extract_link(struct request_data *body, int verbose, FILE *output){
+    static const char tag[]="<li class=\"b_algo\"><h2><a href=\"";
 
-	if(s->ptr == NULL)
-		die("realloc() failed");
+    char *aux, *ptr = body->ptr;
+    int ret = 0;
 
-	memcpy(s->ptr+s->len, ptr, size*nmemb);
-	s->ptr[new_len] = '\0';
-	s->len = new_len;
+    while((ptr = strstr(ptr, tag))){
+        // -1 for null byte
+        ptr += sizeof(tag)-1;
 
-	return size*nmemb;
+        if((aux = strchr(ptr, '"')) == NULL)
+            break;
+
+        *aux = 0x0;
+
+        if(verbose)
+            puts(ptr);
+
+        if(output)
+            fprintf(output, "%s\n", ptr);
+
+        ptr = aux+1;
+        ret++;
+    }
+
+    return ret;
 }
 
-int extract_link(const char *body, int verbose, FILE *output){
-	static const char search[]="<li class=\"b_algo\"><h2><a href=\"";
-	int i,j,ret = 0;
+int main(int argc, char **argv){
+    char *filename = NULL, *search = NULL;
+    int verbose = 1, opt, i;
 
-	for(i=0; body[i]; i++){
-		for(j=0 ; body[i+j] == search[j]; j++){
-			if(search[j+1] == 0x0){
-				j++;
+    struct request_data body;
+    char *url, *encode;
 
-				for(;body[i+j] && body[i+j] != '"'; j++){
-					putchit(body[i+j]);
-				}
+    FILE *output = NULL;
+    CURL *curl;
 
-				putchit('\n');
+    size_t len;
 
-				i += j;
-				ret = 1;
-			}
-		}
-	}
+    while((opt = getopt(argc, argv, "qo:")) != -1){
+        switch(opt){
+            case 'q':
+                verbose = 0;
+                break;
+            case 'o':
+                filename = optarg;
+                break;
+            default:
+                return 1;
+        }
+    }
 
-	return ret;
-}
+    search = argv[optind];
 
-int main(int argc,char *argv[]){
-	char *filename=NULL, *search=NULL, *encode=NULL, o;
-	struct dynamic_str body, url;
-	FILE *output=NULL;
-	int verbose=0, i;
-	CURL *curl;
+    if(!search || (!filename && !verbose))
+        help();
 
-	while ((o = getopt (argc, argv, "s:o:v")) != -1)
-		switch(o){
-			case 'v':
-				verbose = 1;
-				break;
-			case 's':
-				search = optarg;
-				break;
-			case 'o':
-				filename = optarg;
-				break;
-			case '?':
-				if(optopt == 's')
-					fprintf(stderr, "Option -s requires an argument.\n");
-				else if(optopt == 'o')
-					fprintf(stderr, "Option -o requires an argument.\n");
-				else if(optopt == 0)
-					break;
-				else
-					fprintf (stderr, "Unknown option `-%c'.%d\n", optopt,optopt);
-				return 1;
-			default:
-				abort();
-	}
+    if(filename){
+        if((output = fopen(filename, "a")) == NULL)
+            die("fopen()");
+    }
 
-	if(search == NULL || (filename == NULL && verbose == 0))
-		help();
+    printf("searching '%s' ...\n\n", search);
 
-	if(filename){
-		if( (output = fopen(filename, "a")) == NULL )
-			die("fopen()");
-	}
+    // escape string
+    encode = curl_easy_escape(NULL, search, strlen(search));
 
-	printf("\nSearching for '%s' ...\n\n",search);
-	encode = curl_easy_escape(NULL, search, strlen(search));
+    // encoded string + URI
+    len = strlen(encode)+56;
 
-	url.len = strlen(encode)+sizeof(int)+40;
+    if((url = malloc(len)) == NULL){
+        die("malloc() failed");
+    }
 
-	if( (url.ptr = malloc( url.len )) == NULL ){
-		die("malloc() failed");
-	}
+    // init curl and setopts
+    body.ptr = NULL;
+    body.len = 0;
 
+    curl = curl_easy_init();
 
-	for(i=1;i<=211;i+=10){
-		curl = curl_easy_init();
-		init_string(&body);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (X11; Linux x86_64; rv:29.0) Gecko/20100101 Firefox/29.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunc);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
 
-		memset(url.ptr, 0, url.len-1);
-		snprintf(url.ptr, url.len-1, URI, encode, i);
+    for(i=1; i<=211; i+=10){
+        // set index to 0
+        body.index = 0;
 
-		curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15);
-		curl_easy_setopt(curl, CURLOPT_URL, url);
-		curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (X11; Linux x86_64; rv:29.0) Gecko/20100101 Firefox/29.0");
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunc);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
-		curl_easy_perform(curl);
+        // I dont use snprintf here, because I set many space for url
+        // but if you change anything keep an eye on it
+        sprintf(url, URI, encode, i);
 
-		if(!extract_link(body.ptr, verbose, output)){
-			free(body.ptr);
-			curl_easy_cleanup(curl);
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        if(curl_easy_perform(curl) != CURLE_OK)
+            break;
 
-			if(output)
-				fclose(output);
-			break;
-		}
+        // setting null byte
+        if(body.ptr)
+            body.ptr[body.index] = 0;
 
-		free(body.ptr);
-		curl_easy_cleanup(curl);
-	}
+        if(!extract_link(&body, verbose, output)){
+            break;
+        }
+    }
 
-	curl_free(encode);
-	free(url.ptr);
+    curl_easy_cleanup(curl);
+    curl_free(encode);
+    free(body.ptr);
+    free(url);
 
-	printf("\n[ Finish !!! ]\n\n");
-	return 0;
+    if(output)
+        fclose(output);
+
+    printf("\n[ Finish !!! ]\n");
+
+    return 0;
 }
