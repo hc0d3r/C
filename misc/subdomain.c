@@ -7,128 +7,100 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 
-
-#define RED "\e[0;31m"
-#define GREEN "\e[0;32m"
-#define CYAN "\e[1;36m"
-#define RESET "\e[0m"
-
-#define error(f, x...) \
-	fprintf(f, "%s[-]%s ", RED, RESET); \
-	fprintf(f, x);
-
-#define good(f, x...) \
-	fprintf(f, "%s[+]%s ", GREEN, RESET); \
-	fprintf(f, x);
-
-#define info(f, x...) \
-	fprintf(f, "%s[*]%s ", CYAN, RESET); \
-	fprintf(f, x);
-
-void chomp(char *str){
-	size_t i;
-
-	for(i=0; str[i]; i++){
-		if(str[i] == '\n'){
-			str[i] = 0x0;
-			break;
-		}
-	}
-}
-
 void check_host(const char *host){
+    static const struct addrinfo hints = {
+        .ai_family = AF_UNSPEC,
+        .ai_socktype = SOCK_STREAM,
+        .ai_flags = AI_CANONNAME,
+        .ai_protocol = 0
+    };
 
-	struct addrinfo hints, *res, *addr;
-	char str_ip[INET6_ADDRSTRLEN];
+    struct addrinfo *addrlist = NULL;
+    char ip[INET6_ADDRSTRLEN];
+    void *aux;
 
-	memset(&hints, 0x0, sizeof(struct addrinfo));
+    if(getaddrinfo(host, NULL, &hints, &addrlist)){
+        printf(" '--- unknow host\n");
+        goto end;
+    }
 
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags |= AI_CANONNAME;
+    for(; addrlist; addrlist = addrlist->ai_next){
 
+        if(addrlist->ai_family == AF_INET){
+            aux = &((struct sockaddr_in *)addrlist->ai_addr)->sin_addr;
+        } else {
+            aux = &((struct sockaddr_in6 *)addrlist->ai_addr)->sin6_addr;
+        }
 
+        inet_ntop(addrlist->ai_family, aux, ip, INET6_ADDRSTRLEN);
 
-	if( getaddrinfo(host, NULL, &hints, &res) ){
-		error(stdout, "Unknow host\n");
-		return;
-	}
+        printf(" '--- %s\n", ip);
+    }
 
-	good(stdout, "%s\n", host);
-
-	for(addr=res; addr!=NULL; addr=addr->ai_next){
-		if(addr->ai_family == AF_INET){
-			inet_ntop(addr->ai_family, &((struct sockaddr_in *) addr->ai_addr)->sin_addr ,str_ip, INET6_ADDRSTRLEN);
-		} else {
-			inet_ntop(addr->ai_family, &((struct sockaddr_in6 *) addr->ai_addr)->sin6_addr ,str_ip, INET6_ADDRSTRLEN);
-		}
-		info(stdout,"%s\n", str_ip);
-	}
-
-	freeaddrinfo(res);
-
-}
-
-void help(void){
-	good(stdout, "Subdomain finder by m\n");
-	info(stdout, "Usage: ./subdomain [target-hostname] [subdomain-wordlist]\n");
-	exit(0);
+    end:
+    freeaddrinfo(addrlist);
 }
 
 int main(int argc, char *argv[]){
+    size_t hlen, slen, len, size;
+    ssize_t n;
 
-	if(argc != 3){
-		help();
-	}
+    char *ptr, *subdomain, *hostname;
+    FILE *fh;
 
-	char *target = argv[1], *arquivo = argv[2], *subdominio, line[1024];
-	FILE *arq;
+    if(argc != 3){
+        printf("usage: subdomain [hostname] [wordlist]\n");
+        return 0;
+    }
 
-	int i, j;
-	size_t host_len;
+    if((fh = fopen(argv[2], "r")) == NULL){
+        perror("fopen()");
+        return 1;
+    }
 
-	if( (arq = fopen(arquivo, "rt")) == NULL ){
-		error(stderr, "fopen() failed\n");
-		return 1;
-	}
+    hostname = argv[1];
 
-	host_len = strlen(target);
+    hlen = strlen(hostname);
+    slen = size = 0;
+    subdomain = ptr = NULL;
 
-	while(!feof(arq)){
+    while((n = getline(&ptr, &size, fh)) > 0){
+        if(n == 1 && ptr[0] == '\n'){
+            continue;
+        }
 
-		if( fgets(line, 1024, arq) ){
-			chomp(line);
+        if(ptr[n-1] == '\n'){
+            ptr[n--] = 0x0;
+        }
 
-			if( (subdominio = malloc( host_len + strlen(line) + 2)) == NULL ){
-				error(stderr, "malloc() failed\n");
-				exit(1);
-			}
+        len = n+hlen;
 
-			for(j=0; line[j]; j++){
-				subdominio[j] = line[j];
-			}
+        if(ptr[n] != '.' && hostname[0] != '.'){
+            len++;
+        }
 
-			if(j){
-				if(line[j-1] != '.' && target[0] != '.'){
-					subdominio[j++] = '.';
-				}
-			}
+        if(slen < len){
+            subdomain = realloc(subdomain, len+1);
+            slen = len;
+        }
 
-			for(i=0; target[i]; i++, j++){
-				subdominio[j] = target[i];
-			}
+        memcpy(subdomain, ptr, n);
+        if(ptr[n] != '.' && hostname[0] != '.'){
+            subdomain[n++] = '.';
+        }
 
-			subdominio[j] = 0x0;
+        memcpy(subdomain+n, hostname, hlen);
+        subdomain[len] = 0x0;
 
+        printf("[+] %s\n", subdomain);
+        check_host(subdomain);
+        printf("\n\n");
 
-			info(stdout, "Checking -> %s\n", subdominio);
-			check_host(subdominio);
-			free(subdominio);
+    }
 
-		}
-	}
+    fclose(fh);
+    free(subdomain);
+    free(ptr);
 
-	fclose(arq);
-
-	return 0;
+    return 0;
 }
