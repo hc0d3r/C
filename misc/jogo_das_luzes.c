@@ -1,105 +1,173 @@
-// Coded by mmxm :D
-// Demo: http://i.imgur.com/P6c1IiL.gif
-
 #include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <termios.h>
 
 #define LUZ "\e[42;5;1;37m"
+#define RED "\e[41m"
 #define RESET "\e[0m"
 
-int check_win(char x[5][5]){
-	int i = 0, j = 0, ret = 1;
+struct termios oldt;
 
-	for(i=0; i<5; i++){
-		for(j=0; j<5; j++){
-			if(!x[i][j]){
-				ret = 0;
-				goto end;
-			}
-		}
-	}
+void init_terminal(void){
+    struct termios newt;
 
-	end:
+    tcgetattr(STDIN_FILENO, &oldt);
 
-	return ret;
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON|ECHO);
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 }
 
-void draw(char x[5][5]){
-	int i, j;
-	printf("\n y^\n");
-	printf("    ______ ______ ______ ______ ______\n");
-	for(i=4; i>=0; i--){
-		printf(" %d |",i);
-		for(j=0; j<5; j++){
-			if(x[j][i]){
-				printf("%s_0000_%s|", LUZ, RESET);
-			} else {
-				printf("______|");
-			}
-		}
-		printf("\n");
-	}
-
-	printf("\n      0      1      2      3      4     x ->\n\n");
-
-
+void restore_terminal(void){
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
 }
 
-int getpos(char c){
-	int ret = 0;
-	do {
-		printf("\nEnter position %c: ",c);
-		ret = getchar();
-		while(getchar() != '\n');
-	}
-	while(ret < '0' || ret > '4');
+int win(char vet[5][5]){
+    int ret = 1, x, y;
 
-	return ret-'0';
+    for(x=0; x<5; x++){
+        for(y=0; y<5; y++){
+            if(!vet[x][y]){
+                ret = 0;
+                goto end;
+            }
+        }
+    }
+
+    end:
+
+    return ret;
 }
 
 
-void update(char k[5][5], int x, int y){
+void draw(char vet[5][5], int px, int py){
+    char *fmt;
+    int x, y;
 
-	k[x][y] = ~k[x][y];
+    printf("  ______ ______ ______ ______ ______\n");
+    for(y=4; y>=0; y--){
+        printf(" |");
+        for(x=0; x<5; x++){
+            if(px == x && py == y){
+                if(!vet[x][y]){
+                    fmt = "__on__";
+                } else {
+                    fmt = RED "_off__" RESET;
+                }
+            } else {
+                if(vet[x][y]){
+                    fmt = LUZ "_0000_" RESET;
+                } else {
+                    fmt = "______";
+                }
+            }
 
-	if(x - 1 >= 0){
-		k[x-1][y] = ~k[x-1][y];
-	}
-
-	if(x + 1 <= 4){
-		k[x+1][y] = ~k[x+1][y];
-	}
-
-	if(y + 1 <= 4){
-		k[x][y+1] = ~k[x][y+1];
-	}
-
-	if(y - 1 >= 0){
-		k[x][y-1] = ~k[x][y-1];
-	}
-
+            printf("%s|", fmt);
+        }
+        printf("\n");
+    }
 
 }
 
-int main(){
-	static char k[5][5];
-	int numx = 0, numy = 0;
+int getmoviment(int *px, int *py){
+    int ret = 0;
+    char c[3];
+    ssize_t n;
+
+    int x, y;
+
+    x = *px;
+    y = *py;
+
+    n = read(STDIN_FILENO, c, sizeof(c));
+
+    if(n == 3 && c[0] == 27 && c[1] == 91){
+        // up
+        if(c[2] == 65 && y+1 < 5){
+            y++;
+        }
+
+        // down
+        if(c[2] == 66 && y-1 >= 0){
+            y--;
+        }
+
+        // right
+        if(c[2] == 67 && x+1 < 5){
+            x++;
+        }
+
+        // left
+        if(c[2] == 68 && x-1 >= 0){
+            x--;
+        }
+    }
+
+    if(n <= 0)
+        ret = 'q';
+    else
+        ret = c[0];
+
+    *px = x;
+    *py = y;
+
+    return ret;
+}
 
 
-	while(1){
-		printf("\e[1;1H\e[2J");
-		draw(k);
+void update(char vet[5][5], int x, int y){
 
-		if(check_win(k)){
-			break;
-		}
+    vet[x][y] = ~vet[x][y];
 
-		numx = getpos('x');
-		numy = getpos('y');
+    if(x - 1 >= 0){
+        vet[x-1][y] = ~vet[x-1][y];
+    }
 
-		update(k, numx, numy);
-	}
+    if(x + 1 <= 4){
+        vet[x+1][y] = ~vet[x+1][y];
+    }
 
-	printf("You win :D\n");
-	return 0;
+    if(y + 1 <= 4){
+        vet[x][y+1] = ~vet[x][y+1];
+    }
 
+    if(y - 1 >= 0){
+        vet[x][y-1] = ~vet[x][y-1];
+    }
+
+}
+
+int main(void){
+    char vet[5][5];
+    int x, y;
+
+    memset(vet, 0x0, sizeof(vet));
+    x = y = 2;
+
+    printf("press q to exit\n");
+
+    init_terminal();
+
+    do {
+        draw(vet, x, y);
+        char c = getmoviment(&x, &y);
+        if(c == 'q'){
+            goto end;
+        } else if(c == 32){
+            update(vet, x, y);
+        }
+
+        printf("\e[6A");
+
+    } while(!win(vet));
+
+    draw(vet, 5, 5);
+    printf("\nyou win !\n");
+
+    end:
+    restore_terminal();
+
+    return 0;
 }
