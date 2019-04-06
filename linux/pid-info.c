@@ -1,143 +1,128 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdio.h>
-#include <dirent.h>
-#include <errno.h>
-#include <string.h>
+#include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <pwd.h>
-#include <assert.h>
-#define PROC "/proc/"
 
-/* ************************************ *
- * Get PIDs and cmdline from /proc/	*
- * Ter Fev 10 18:38:31 BRST 2015	*
- * Author: MMxM | hc0der.blogspot.com	*
- * ************************************ */
+int print_cmdline(pid_t pid){
+    char buf[1024];
 
+    ssize_t n, i;
+    int fd, ret = 0;
 
-void *xmalloc(size_t len);
-void safefree(void **ptr);
-void die(const char *err);
-int cmdline_info(const char *cmd);
-void status_info(const char *path, size_t len);
+    sprintf(buf, "/proc/%d/cmdline", pid);
+    if((fd = open(buf, O_RDONLY)) == -1)
+        goto end;
 
-void die(const char *err){
-	(errno) ? perror(err) : fprintf(stderr,"%s\n",err);
-	exit(1);
+    while((n = read(fd, buf, sizeof(buf))) > 0){
+        for(i=0; i<n; i++){
+            char c = buf[i];
+            putchar(c ? c : ' ');
+        }
+        ret += n;
+    }
+
+    close(fd);
+
+    end:
+    return ret;
 }
 
-void *xmalloc(size_t len){
-	void *ptr = malloc(len);
-	if(ptr == NULL)
-		die("malloc error");
-	return ptr;
+void print_status(pid_t pid){
+    char buf[1024];
+
+    ssize_t n, i;
+    int fd;
+
+    sprintf(buf, "/proc/%d/status", pid);
+    if((fd = open(buf, O_RDONLY)) == -1)
+        return;
+
+    lseek(fd, 6, SEEK_SET);
+
+    putchar('[');
+
+    while((n = read(fd, buf, sizeof(buf))) > 0){
+        for(i=0; i<n; i++){
+            if(buf[i] == '\n')
+                goto end;
+
+            putchar(buf[i]);
+        }
+    }
+
+    end:
+    putchar(']');
+
+    close(fd);
+
 }
 
-void xfree(void **ptr){
-	assert(ptr);
-	if(ptr != NULL){
-		free(*ptr);
-		*ptr = NULL;
-	}
-}
+pid_t *getpids(void){
+    pid_t *ret = NULL;
+    size_t len = 0;
 
-int cmdline_info(const char *cmd){
-	FILE *fp = NULL;
-	char C = 0;
-	size_t x = 0;
+    struct dirent *dirp;
+    DIR *dir;
 
+    if((dir = opendir("/proc")) == NULL)
+        goto end;
 
-	if( (fp = fopen(cmd,"r")) == NULL)
-		return 0;
+    while((dirp = readdir(dir))){
+        if(dirp->d_type != DT_DIR ||
+          (dirp->d_name[0] < '0' || dirp->d_name[0] > '9'))
+            continue;
 
-	while( (C = fgetc(fp)) != EOF )
-		x += printf("%c",C);
+        ret = realloc(ret, (len+1)*sizeof(pid_t));
+        if(ret == NULL)
+            break;
 
-	fclose(fp);
+        ret[len++] = atoi(dirp->d_name);
+    }
 
-	return x;
-}
+    closedir(dir);
 
-void status_info(const char *path, size_t len){
-	char *status_file = NULL, C = 0;
-	FILE *fp = NULL;
-
-	status_file = strncpy( xmalloc( (len+6) * sizeof(char) ), path, len);
-	strncat(status_file, "status", 6);
-
-	if( (fp = fopen(status_file, "r")) != NULL){
-		fseek(fp, 6, SEEK_SET);
-		while( (C = fgetc(fp)) != '\n')
-			printf("%c",C);
-
-		fclose(fp);
-	}
-
-	xfree((void **)&status_file);
-
+    end:
+    return ret;
 }
 
 int main(void){
-	DIR *dip;
-	struct dirent *dit;
-	struct stat owner;
-	struct passwd *pd;
-	int pid_nb = 0;
+    struct passwd *pw;
+    struct stat st;
 
-	char *file = NULL, *cmdline = NULL;
-	size_t alloc_size = 0;
+    char filename[32];
+    pid_t *pids, pid;
 
-	if( (dip=opendir(PROC)) == NULL )
-		die("opendir() error");
+    if((pids = getpids()) == NULL){
+        perror("getpids()");
+        return 1;
+    }
 
+    printf("USER\tPID\tCOMMAND\n");
+    while((pid = *pids++)){
+        sprintf(filename, "/proc/%d", pid);
 
-	printf("USER\tPID\tCOMMAND\n");
+        if(stat(filename, &st) == -1){
+            continue;
+        }
 
-	while ( (dit = readdir(dip) ) != NULL ){
-		if(dit->d_type != 4)
-			continue;
+        if((pw = getpwuid(st.st_uid)) == NULL){
+            continue;
+        }
 
-		pid_nb = (int) strtol(dit->d_name, NULL, 10);
+        printf("%s\t", pw->pw_name);
+        printf("%d\t", pid);
 
-		if(pid_nb == 0)
-			continue;
+        if(!print_cmdline(pid)){
+            print_status(pid);
+        }
 
-		alloc_size = 6+strlen(dit->d_name)+2;
+        putchar('\n');
+    }
 
-		file = xmalloc( alloc_size * sizeof(char));
-		snprintf(file, alloc_size, "%s%s/",PROC,dit->d_name);
-
-		if(stat(file, &owner) == -1){
-			xfree((void **)&file);
-			continue;
-		}
-
-		if((pd = getpwuid(owner.st_uid)) == NULL){
-			xfree((void **)&file);
-			continue;
-		}
-
-		printf("%s\t",pd->pw_name);
-		printf("%s\t",dit->d_name);
-
-		cmdline = strncpy( xmalloc( alloc_size + 7 ) , file , alloc_size );
-		strncat(cmdline,"cmdline",7);
-
-		if(!cmdline_info(cmdline)){
-			printf("[");
-			status_info(file, alloc_size);
-			printf("]");
-		}
-
-		printf("\n");
-
-		xfree((void **)&cmdline);
-		xfree((void **)&file);
-	}
-
-	closedir(dip);
-
-	return 0;
-
+    return 0;
 }
