@@ -16,14 +16,14 @@ int checkVbox(void){
         goto end;
     }
 
-    if(RegQueryValueEx(key, TEXT("SystemBiosVersion"), 0,
+    if(RegQueryValueEx(key, TEXT("VideoBiosVersion"), 0,
         &ktype, value, &size) != ERROR_SUCCESS){
         goto end;
     }
 
     RegCloseKey(key);
 
-    if(strstr(value,"VBOX")){
+    if(strstr(value,"VirtualBox")){
         ret = 1;
     }
 
