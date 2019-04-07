@@ -1,77 +1,89 @@
-// RC4 Exemplo, coded by mmxm
-
+#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
+#include <fcntl.h>
 
-#define swap(x,y) x ^= y; y ^= x; x ^= y
+typedef struct rc4 {
+    unsigned char s[256];
+    int i;
+    int j;
+} rc4_t;
 
-typedef unsigned char uchar;
+void rc4_ksa(rc4_t *rc4, const char *key, size_t keysize){
+    int i, j = 0;
+    char tmp;
 
-struct dynamic_str {
-	uchar *ptr;
-	size_t len;
-};
+    rc4->i = 0;
+    rc4->j = 0;
 
-void ksa(uchar *s, uchar *key, size_t key_size){
-	int i=0,j=0;
+    for(i=0; i<256; i++){
+        rc4->s[i] = i;
+    }
 
-	for(i=0; i<256; i++){
-		s[i]=i;
-	}
-
-	for(i=0; i<256; i++){
-		j = (j+s[i]+ key[i % key_size]) % 256;
-		swap(s[i], s[j]);
-	}
+    for(i=0; i<256; i++){
+        j = (j + rc4->s[i] + key[i % keysize]) & 0xff;
+        tmp = rc4->s[i];
+        rc4->s[i] = rc4->s[j];
+        rc4->s[j] = tmp;
+    }
 
 }
 
-void prga(const uchar *word, uchar *s, struct dynamic_str *result){
-	size_t i=0,j=0, aux;
+void rc4_prga(rc4_t *rc4, char *out, const char *data, size_t len){
+    register size_t aux;
+    char tmp;
 
-	result->ptr = malloc(1);
-	result->len = 1;
+    int i = rc4->i;
+    int j = rc4->j;
 
+    for(aux=0; aux<len; aux++){
+        i = (i + 1) & 0xff;
+        j = (j + rc4->s[i]) & 0xff;
 
-	for(aux=0; word[aux]; aux++){
-		i = (i+1)%256;
-		j = (j+s[i])%256;
-		swap(s[i], s[j]);
+        tmp = rc4->s[i];
+        rc4->s[i] = rc4->s[j];
+        rc4->s[j] = tmp;
 
-		result->len++;
-		result->ptr = realloc(result->ptr, result->len);
-		result->ptr[aux] = (s[(s[i]+s[j]) %256]^word[aux]);
-	}
+        out[aux] = rc4->s[(rc4->s[i]+rc4->s[j]) & 0xff]^data[aux];
+    }
 
-	result->ptr[aux] = 0x0;
+    rc4->i = i;
+    rc4->j = j;
 }
 
-int main(void){
-	uchar s[256];
-	uchar key[256];
-	uchar word[256];
-	size_t key_len;
+int main(int argc, char **argv){
+    char enc[1024], buf[1024];
+    rc4_t rc4;
 
-	struct dynamic_str encode, decode;
+    size_t keysize;
+    ssize_t n;
+    int fd;
 
-	strcpy((char *)key, "do_or_die"); // > 255 == stack overflow
-	strcpy((char *)word, "\natirei o pau na dilma, mas a dilma não morreu\n");
+    if(argc != 3){
+        printf("rc4 [key] [file] > output\n");
+        return 0;
+    }
 
-	key_len = strlen((const char *)key);
+    fd = open(argv[2], O_RDONLY);
+    if(fd == -1){
+        perror("open()");
+        return 1;
+    }
 
-	ksa(s, key, key_len);
-	prga(word, s, &encode);
+    keysize = strlen(argv[1]);
+    if(!keysize){
+        printf("invalid key\n");
+        return 1;
+    }
 
-	printf("RC4:\n'%s'\n", encode.ptr);
+    rc4_ksa(&rc4, argv[1], keysize);
 
-	ksa(s, key, key_len);
-	prga(encode.ptr, s, &decode);
+    while((n = read(fd, buf, sizeof(buf))) > 0){
+        rc4_prga(&rc4, enc, buf, (size_t)n);
+        write(STDOUT_FILENO, enc, n);
+    }
 
-	printf("Decoded:\n'%s'\n", decode.ptr);
+    close(fd);
 
-	free(decode.ptr);
-	free(encode.ptr);
-
-	return 0;
+    return 0;
 }
