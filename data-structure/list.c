@@ -45,7 +45,7 @@ int main(void){
     }
 
     for(i=0; i<list.n; i++){
-        printf("--> %zu\n", *(size_t *)list.ptr+i);
+        printf("-----> %zu\n", *(size_t *)list.ptr+i);
     }
 
     free(list.ptr);
